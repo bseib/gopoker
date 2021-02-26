@@ -2,11 +2,11 @@ package main
 /*
     Number of Distinct Hand Values:
 
-    Straight Flush   10 
+    Straight Flush   10
     Four of a Kind   156      [(13 choose 2) * (2 choose 1)]
     Full Houses      156      [(13 choose 2) * (2 choose 1)]
     Flush            1277     [(13 choose 5) - 10 straight flushes]
-    Straight         10 
+    Straight         10
     Three of a Kind  858      [(13 choose 3) * (3 choose 1)]
     Two Pair         858      [(13 choose 3) * (3 choose 2)]
     One Pair         2860     [(13 choose 4) * (4 choose 1)]
@@ -19,15 +19,19 @@ package main
 
     Examples:
     = Royal flush        = 1
-    = 7-5-4-3-2 unsuited = 7462    
+    = 7-5-4-3-2 unsuited = 7462
 */
 
 import (
+	"bufio"
+	"encoding/csv"
+	"flag"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"strconv"
-	"io"
-	"encoding/csv"
+	"strings"
 )
 
 var HANDSIZE_TO_PERMUTATION_MAP = make(map[int][][5]uint8, 3)
@@ -37,7 +41,7 @@ var FIVE_CHOOSE_FIVE = [][5]uint8 {
 }
 
 var SIX_CHOOSE_FIVE = [][5]uint8 {
-    {0, 1, 2, 3, 4}, 
+    {0, 1, 2, 3, 4},
 	{0, 1, 2, 3, 5},
 	{0, 1, 2, 4, 5},
 	{0, 1, 3, 4, 5},
@@ -47,7 +51,7 @@ var SIX_CHOOSE_FIVE = [][5]uint8 {
 
 var SEVEN_CHOOSE_FIVE = [][5]uint8 {
     {0, 1, 2, 3, 4}, {0, 1, 2, 3, 5}, {0, 1, 2, 3, 6},
-	{0, 1, 2, 4, 5}, {0, 1, 2, 4, 6}, {0, 1, 2, 5, 6}, 
+	{0, 1, 2, 4, 5}, {0, 1, 2, 4, 6}, {0, 1, 2, 5, 6},
 	{0, 1, 3, 4, 5}, {0, 1, 3, 4, 6}, {0, 1, 3, 5, 6},
 	{0, 1, 4, 5, 6}, {0, 2, 3, 4, 5}, {0, 2, 3, 4, 6},
 	{0, 2, 3, 5, 6}, {0, 2, 4, 5, 6}, {0, 3, 4, 5, 6},
@@ -57,7 +61,7 @@ var SEVEN_CHOOSE_FIVE = [][5]uint8 {
 
 // maps string value => prime number
 var STRING_INT_TO_PRIME = map[uint8]uint32 {
-    65 : 41, // A 
+    65 : 41, // A
     75 : 37, // K
     81 : 31, // Q
     74 : 29, // J
@@ -69,7 +73,7 @@ var STRING_INT_TO_PRIME = map[uint8]uint32 {
     53 : 7, // 5
     52 : 5, // 4
     51 : 3, // 3
-    50 : 2, // 2    
+    50 : 2, // 2
 }
 
 var PRIMES = [...]uint32 {
@@ -77,7 +81,7 @@ var PRIMES = [...]uint32 {
 }
 
 var STRING_INT_TO_RANK = map[uint8]uint32 {
-    65 : 12, // A 
+    65 : 12, // A
     75 : 11, // K
     81 : 10, // Q
     74 : 9, // J
@@ -89,7 +93,7 @@ var STRING_INT_TO_RANK = map[uint8]uint32 {
     53 : 3, // 5
     52 : 2, // 4
     51 : 1, // 3
-    50 : 0, // 2    
+    50 : 0, // 2
 }
 
 var STRING_INT_TO_SUIT = map[uint8]uint32 {
@@ -103,10 +107,10 @@ var FLUSH_LOOKUP = make(map[uint32]uint32)
 var UNSUITED_LOOKUP = make(map[uint32]uint32)
 
 func init() {
-    
+
     FLUSH_LOOKUP = int_csv_to_map("flush_lookup.csv")
     UNSUITED_LOOKUP = int_csv_to_map("unsuited_lookup.csv")
-    
+
     HANDSIZE_TO_PERMUTATION_MAP = map[int][][5]uint8 {
         5 : FIVE_CHOOSE_FIVE,
         6 : SIX_CHOOSE_FIVE,
@@ -115,27 +119,71 @@ func init() {
 }
 
 func main() {
-	cards := make([]uint32, len(os.Args) - 1)
-	for i := 1; i < len(os.Args); i++ {
-	    cards[i-1] = make_card(os.Args[i])
+	sourceFile := flag.String("f", "", "Evaluate all hands listed in source file.")
+	showHandFlag := flag.Bool("h", false, "Print the hand after printing the computed hand value.")
+	flag.Parse()
+	args := flag.Args()
+
+	if (len(args) == 0 || len(*sourceFile) > 0) {
+		if (len(*sourceFile) > 0) {
+			// open file, return if failure
+			file, err := os.Open(*sourceFile)
+			if err != nil {
+				fmt.Println("Error:", err)
+				os.Exit(3)
+			}
+			defer file.Close()
+
+			sc := bufio.NewScanner(file)
+			for sc.Scan() {
+				line := sc.Text()  // GET the line string
+				line_args := strings.Split(line, " ")
+				score_and_print_hand(line_args, *showHandFlag)
+			}
+			if err := sc.Err(); err != nil {
+				log.Fatalf("scan file error: %v", err)
+				os.Exit(4)
+			}
+		} else {
+			fmt.Printf("hey, no args, and no file!\n")
+			os.Exit(2)
+		}
+	} else {
+		score_and_print_hand(args, *showHandFlag)
 	}
-	
+}
+
+func score_and_print_hand(cardList []string, isShowHand bool) {
+	best_score := score_hand(cardList)
+	fmt.Print(best_score)
+	if (isShowHand) {
+		fmt.Printf(" %s", strings.Join(cardList, " "))
+	}
+	fmt.Println()
+}
+
+func score_hand(cardList []string) uint32 {
+	cards := make([]uint32, len(cardList))
+	for i := 0; i < len(cardList); i++ {
+		cards[i] = make_card(cardList[i])
+		//fmt.Printf(": %d %d %s\n", i, cards[i], cardList[i])
+	}
+
 	// get the permutations and the evaluation function
 	possible_hands := hand_permutations(cards, HANDSIZE_TO_PERMUTATION_MAP[len(cards)])
-	
+
 	best_score := uint32(7462)
 	for _, hand := range possible_hands {
-	    handscore := five(hand)
-	    if handscore < best_score {
-	        best_score = handscore
-	    }
+		handscore := five(hand)
+		if handscore < best_score {
+			best_score = handscore
+		}
 	}
-	
-	fmt.Print(best_score)
+	return best_score
 }
 
 func int_csv_to_map(filepath string) map[uint32]uint32 {
-    
+
     mapping := make(map[uint32]uint32)
 
     // open file, return if failure
@@ -143,12 +191,12 @@ func int_csv_to_map(filepath string) map[uint32]uint32 {
     if err != nil {
         fmt.Println("Error:", err)
         return nil
-    } 
+    }
     defer file.Close()
-    
+
     reader := csv.NewReader(file)
     for {
-        
+
         // read a line
         record, err := reader.Read()
         if err == io.EOF {
@@ -157,18 +205,18 @@ func int_csv_to_map(filepath string) map[uint32]uint32 {
             fmt.Println("Error:", err)
             return nil
         }
- 
+
         // set our map
         prime_product, _ := strconv.Atoi(record[0])
         rank, _ := strconv.Atoi(record[1])
         mapping[uint32(prime_product)] = uint32(rank)
     }
-    
+
     return mapping
 }
 
 func five(cards []uint32) uint32 {
-    if cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000 != 0 { 
+    if cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000 != 0 {
         // if flush
         handOR := (cards[0] | cards[1] | cards[2] | cards[3] | cards[4]) >> 16
         prime := prime_product_from_rankbits(handOR)
@@ -182,9 +230,9 @@ func five(cards []uint32) uint32 {
 
 func make_card(cardstring string) uint32 {
     /*
-    Cards are 32-bit integers, so there is no object instantiation - 
-    they are just ints. Most of the bits are used, and have a specific meaning. 
-    See below: 
+    Cards are 32-bit integers, so there is no object instantiation -
+    they are just ints. Most of the bits are used, and have a specific meaning.
+    See below:
                                     Card:
 
                           bitrank     suit rank   prime
@@ -205,7 +253,7 @@ func make_card(cardstring string) uint32 {
 
     and is also quite performant.
     */
-    
+
     rank := STRING_INT_TO_RANK[cardstring[0]]
     rankprime := STRING_INT_TO_PRIME[cardstring[0]]
     bitrank := uint32(1) << rank << 16
